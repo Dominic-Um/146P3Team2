@@ -8,7 +8,7 @@ def show_match(bot, opponent_bot, map_num):
         game is replayed via a visual interface.
     """
     command = 'java -jar tools/PlayGame.jar maps/map' + str(map_num) + '.txt 1000 1000 log.txt ' + \
-              '"python ' + bot + '" ' + \
+              '"py -3 ' + bot + '" ' + \
               '"python ' + opponent_bot + '" ' + \
               '| java -jar tools/ShowGame.jar'
     print(command)
