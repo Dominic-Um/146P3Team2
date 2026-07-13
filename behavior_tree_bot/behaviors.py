@@ -21,6 +21,15 @@ def available_ships(planet):
     # It can be zero if the planet is already pretty weak.
     return max(0, int(planet.num_ships) - reserve_ships(planet))
 
+def max_orders_for_state(state):
+    # The original version always used 2 orders per turn.
+    # This scales a little with empire size, but caps at 3 so it doesn't get chaotic.
+    planet_count = len(state.my_planets())
+    if planet_count >= 6:
+        return 3
+    if planet_count >= 3:
+        return 2
+    return 1
 
 def ships_needed_to_capture(state, source, target):
     # For Neutral planets, we just need to beat their current ships.
@@ -33,6 +42,64 @@ def ships_needed_to_capture(state, source, target):
     distance = state.distance(source.ID, target.ID)
     return int(target.num_ships + (target.growth_rate * distance)) + 1
 
+def pooled_orders_for_target(state, target):
+    # One nearby planet can pay for the whole attack.
+    # If that fails, try pooling from up to 3 nearby planets.
+    # (The simplest case)
+    sources = []
+
+    for source in state.my_planets():
+        usable_ships = available_ships(source)
+        if usable_ships > 0:
+            distance = state.distance(source.ID, target.ID)
+            sources.append((distance, source, usable_ships))
+
+    if not sources:
+        return []
+
+    sources.sort()
+
+    # Single-source attack.
+    for distance, source, usable_ships in sources:
+        ships_needed = ships_needed_to_capture(state, source, target)
+        if usable_ships >= ships_needed:
+            return [(source, ships_needed)]
+
+    # Multi-source attack.
+    # (I only use the closest 3 sources because sending from everywhere gets messy fast)
+    selected_sources = []
+    total_available = 0
+    max_sources = 3
+
+    for distance, source, usable_ships in sources:
+        if len(selected_sources) >= max_sources:
+            break
+
+        selected_sources.append((distance, source, usable_ships))
+        total_available += usable_ships
+
+        farthest_distance = selected_sources[-1][0]
+        if target.owner == 0:
+            ships_needed = int(target.num_ships) + 2
+        else:
+            ships_needed = int(target.num_ships + (target.growth_rate * farthest_distance)) + 1
+
+        if total_available >= ships_needed:
+            orders = []
+            ships_left_to_send = ships_needed
+
+            for source_distance, selected_source, selected_available in selected_sources:
+                ships_from_this_source = min(selected_available, ships_left_to_send)
+                if ships_from_this_source > 0:
+                    orders.append((selected_source, ships_from_this_source))
+                    ships_left_to_send -= ships_from_this_source
+
+                if ships_left_to_send <= 0:
+                    break
+
+            return orders
+
+    return []
 
 def best_source_for_target(state, target):
     # Find one of our planets that can actually afford this attack/expansion.
@@ -80,8 +147,8 @@ def enemy_planet_score(state, planet):
 
 
 def attack_weakest_enemy_planet(state):
-    # Used a different strategy. It estimates how many ships are needed and only attacks
-    # if the move is legal.
+    # Used a different strategy to the original version of attack_weakest_enemy_planet.
+    # This one ranks enemy planets, then tries to attack if we can actually afford the move.
     enemy_targets = [
         planet for planet in state.enemy_planets()
         if not already_targeted_by_me(state, planet.ID)
@@ -95,22 +162,26 @@ def attack_weakest_enemy_planet(state):
 
     enemy_targets.sort(key=get_enemy_score)
 
-    orders_sent = 0
-    max_orders_this_turn = 2
+    targets_attacked = 0
+    max_targets_this_turn = max_orders_for_state(state)
 
     for target in enemy_targets:
-        if orders_sent >= max_orders_this_turn:
+        if targets_attacked >= max_targets_this_turn:
             break
 
-        source, ships_needed = best_source_for_target(state, target)
-        if source is None:
+        orders = pooled_orders_for_target(state, target)
+        if not orders:
             continue
 
-        if issue_order(state, source.ID, target.ID, ships_needed):
-            orders_sent += 1
+        sent_any_order = False
+        for source, ships_to_send in orders:
+            if issue_order(state, source.ID, target.ID, ships_to_send):
+                sent_any_order = True
 
-    return orders_sent > 0
+        if sent_any_order:
+            targets_attacked += 1
 
+    return targets_attacked > 0
 
 def spread_to_weakest_neutral_planet(state):
     # Also optimized. Instead of literally grabbing only the weakest neutral planet,
@@ -187,7 +258,6 @@ def defend_threatened_planet(state):
             if planet.ID != target.ID
         ]
 
-        # This replaces: key=lambda planet: state.distance(planet.ID, target.ID)
         def get_distance_to_target(planet):
             return state.distance(planet.ID, target.ID)
 
