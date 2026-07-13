@@ -32,6 +32,11 @@ def setup_behavior_tree():
     attack = Action(attack_weakest_enemy_planet)
     offensive_plan.child_nodes = [largest_fleet_check, enemy_planet_check, attack]
 
+    defense_plan = Sequence(name='Defensive Strategy')
+    threat_check = Check(is_any_planet_under_threat)
+    defense_action = Action(defend_threatened_planet)
+    defense_plan.child_nodes = [threat_check, defense_action]
+
     spread_sequence = Sequence(name='Spread Strategy')
     neutral_planet_check = Check(if_neutral_planet_available)
     spread_action = Action(spread_to_weakest_neutral_planet)
@@ -43,7 +48,7 @@ def setup_behavior_tree():
     fallback_plan.child_nodes = [fallback_enemy_check, fallback_attack]
     #alt root.child_nodes = [spread_sequence, offensive_plan, fallback_plan]
 
-    root.child_nodes = [offensive_plan, spread_sequence, fallback_plan]
+    root.child_nodes = [offensive_plan, defense_plan, spread_sequence, fallback_plan]
 
     logging.info('\n' + root.tree_to_string())
     return root
